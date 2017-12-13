@@ -87,7 +87,7 @@ class BOV:
 		vocab = self.bov_helper.scale.transform(vocab.reshape(1, -1) / 1.0)
 
 		# predict the class of the image
-		lb = self.bov_helper.clf.predict_proba(vocab)
+		lb = self.bov_helper.clf.predict(vocab)
 		# print "Image belongs to class : ", self.name_dict[str(int(lb[0]))]
 		return lb
 
@@ -106,7 +106,7 @@ class BOV:
 		count = 0
 		right = 0
 
-		proba = [0.24, 0.25, 0.25, 0.15]
+		# proba = [0.24, 0.26, 0.25, 0.15]
 		proba = [0, 0, 0, 0]
 
 		for word, imlist in self.testImages.items():
@@ -116,13 +116,14 @@ class BOV:
 				if cl is None:
 					name = "Unknown"
 				else:
-					index = np.argmax(cl[0] - proba)
-					name = self.name_dict[str(index)]
+					# index = np.argmax(cl[0] - proba)
+					# name = self.name_dict[str(index)]
+					name = self.name_dict[str(int(cl[0]))]
 				if name == word:
-					print("Predict:", word, cl, name, "TRUE")
+					print("Predict:", word, name, "TRUE")
 					right += 1
 				else:
-					print("Predict:", word, cl, name)
+					print("Predict:", word, name)
 				count += 1
 				# predictions.append({
 				# 	'image': im,

@@ -6,7 +6,7 @@ import math
 from glob import glob
 from sklearn.cluster import KMeans
 from sklearn.svm import SVC, LinearSVC
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, AdaBoostClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 from matplotlib import pyplot as plt
@@ -15,38 +15,36 @@ from skimage.feature import hog
 
 class ImageHelpers:
 	def __init__(self):
-		self.sift_object = cv2.xfeatures2d.SURF_create(400, nOctaveLayers=4)
-		# self.sift_object = cv2.ORB_create(patchSize=64, edgeThreshold=8, nlevels=1)
+		self.sift_object = cv2.xfeatures2d.SIFT_create(200, edgeThreshold=50, contrastThreshold=0.02)
+		# self.sift_object = cv2.xfeatures2d.SURF_create(extended=True)
+		# self.sift_object = cv2.ORB_create(patchSize=32, edgeThreshold=15, nlevels=4)    # 66%
 
-	def gray(self, image):
-		return cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-
-	def yuv(self, image):
-		return cv2.cvtColor(image, cv2.COLOR_RGB2YUV)
+	def trans(self, image):
+		return cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
 
 	def features(self, image):
-		keypoints, descriptors = self.sift_object.detectAndCompute(image, None)
+		kp = self.sift_object.detect(self.trans(image), None)
+		kp, des = self.sift_object.compute(image, kp)
+		# keypoints, descriptors = self.sift_object.detectAndCompute(self.trans(image), None)
 		# print(len(keypoints))
-		return [keypoints, descriptors]
-
-	def extract_hog(self, image):
-		return hog(image, block_norm="L2", transform_sqrt=True)
+		return [kp, des]
 
 
 class BOVHelpers:
 	def __init__(self, n_clusters=20):
 		self.n_clusters = n_clusters
 		# self.kmeans_obj = pickle.load(open("models/model_Kmeans.sav", 'rb'))
-		self.kmeans_obj = KMeans(n_clusters=n_clusters)
+		self.kmeans_obj = KMeans(n_clusters=n_clusters, tol=0.1, random_state=111)
 		self.kmeans_ret = None
 		self.descriptor_vstack = None
 		self.mega_histogram = None
 		self.scale = StandardScaler()
 		# self.clf = pickle.load(open("models/model_Classifier.sav", 'rb'))
-		# self.clf = SVC(kernel="rbf", C=2.8, gamma=0.0073, cache_size=10000, probability=False, random_state=111)
+		self.clf = SVC(kernel="rbf", C=2.8, gamma=0.0073, cache_size=10000, probability=False, random_state=111)
 		# self.clf = RandomForestClassifier(n_estimators=90, max_depth=10, random_state=111)
 		# self.clf = GradientBoostingClassifier(n_estimators=90, max_depth=5, subsample=0.9)
-		self.clf = LogisticRegression(C=0.0007, solver="lbfgs", max_iter=150, n_jobs=-1)
+		# self.clf = LogisticRegression(C=0.1, solver="lbfgs", max_iter=150, n_jobs=-1, multi_class="multinomial")
+		# self.clf = AdaBoostClassifier(n_estimators=60, random_state=111)
 
 	def cluster(self):
 		"""	
@@ -119,7 +117,6 @@ class BOVHelpers:
 
 
 		"""
-		print("Training SVM")
 		print(self.clf)
 		# print("Train labels", train_labels)
 		print("Features", self.mega_histogram.shape)
@@ -128,7 +125,7 @@ class BOVHelpers:
 		print("Training completed")
 
 	def predict(self, iplist):
-		predictions = self.clf.predict_proba(iplist)
+		predictions = self.clf.predict(iplist)
 		# predictions = self.clf.predict(iplist)
 		return predictions
 
