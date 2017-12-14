@@ -47,7 +47,6 @@ class BOVW:
 		self.class_threshold = class_threshold
 
 		# protecte variables
-		self._scale = StandardScaler()
 		self._xfeat = cv2.xfeatures2d.SIFT_create(self.max_features_per_image,
 		                                          edgeThreshold=self.edge_threshold,
 		                                          contrastThreshold=self.contrast_threshold)
@@ -55,10 +54,11 @@ class BOVW:
 			try:
 				self._histogram = np.load("models/X.npy")
 				self._labels = np.load("models/y.npy")
-				self._labels_dict = np.load("models/y_dict.npy")
+				self._labels_dict = np.load("models/y_dict.npy").item()
 				self._kmeans = pickle.load(open("models/kmeans.sav", 'rb'))
+				self._scale = pickle.load(open("models/scale.sav", "rb"))
 			except Exception as e:
-				print(e)
+				print("Can't load local file!", e)
 				self.is_reuse = False
 
 		if not self.is_reuse:
@@ -68,6 +68,7 @@ class BOVW:
 			self._kmeans = KMeans(n_clusters=self.n_bags,
 			                      tol=self.tol,
 			                      random_state=self.random_state)
+			self._scale = StandardScaler()
 
 	def fit(self, train_path):
 		"""Train images in train_path"""
@@ -178,13 +179,13 @@ class BOVW:
 						if self.probability:
 							print("Predict", label, name, raw_predict, "TRUE")
 						else:
-							print("Predict", label, name, target, "TRUE")
+							print("Predict", label, name, "TRUE")
 					true += 1.0
 				elif self.verbose:
 					if self.probability:
 						print("Predict", label, name, raw_predict)
 					else:
-						print("Predict", label, name, target)
+						print("Predict", label, name)
 
 				count += 1.0
 
@@ -210,7 +211,7 @@ class BOVW:
 		y_true = np.asarray(y_true)
 		y_pred = np.asarray(y_pred)
 
-		percision, recall, fscore, support = precision_recall_fscore_support(y_true, y_pred, average="micro")
+		percision, recall, fscore, support = precision_recall_fscore_support(y_true, y_pred, average=None)
 
 		return percision, recall
 
@@ -238,6 +239,7 @@ class BOVW:
 		np.save("models/X.npy", self._histogram)
 		np.save("models/y.npy", self._labels)
 		np.save("models/y_dict.npy", self._labels_dict)
+		pickle.dump(self._scale, open("models/scale.sav", "wb"))
 		pickle.dump(self._kmeans, open("models/kmeans.sav", 'wb'))
 		pickle.dump(self.estimator, open("models/estimator.sav", 'wb'))
 		print("Done persist!")
