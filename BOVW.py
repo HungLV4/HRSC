@@ -276,7 +276,7 @@ class BOVW:
 		n_sample, count = 0, 0
 		for each in glob(path + "*"):
 			# Extract lable from path
-			label = each.split("\\")[-1]
+			label = each.replace("\\", "/").split("/")[-1]
 			if self.verbose:
 				print("Reading image from", label)
 
