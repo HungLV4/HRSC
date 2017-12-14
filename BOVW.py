@@ -52,76 +52,78 @@ class BOVW:
 		                                          edgeThreshold=self.edge_threshold,
 		                                          contrastThreshold=self.contrast_threshold)
 		if self.is_reuse:
-			self._kmeans = pickle.load(open("models/kmeans.sav", 'rb'))
-		else:
+			try:
+				self._histogram = np.load("models/X.npy")
+				self._labels = np.load("models/y.npy")
+				self._labels_dict = np.load("models/y_dict.npy")
+				self._kmeans = pickle.load(open("models/kmeans.sav", 'rb'))
+			except Exception as e:
+				print(e)
+				self.is_reuse = False
+
+		if not self.is_reuse:
+			self._histogram = None
+			self._labels = np.array([])
+			self._labels_dict = {}
 			self._kmeans = KMeans(n_clusters=self.n_bags,
 			                      tol=self.tol,
 			                      random_state=self.random_state)
-		self._labels_dict = {}  # label to encoded label
-		self._histogram = None
 
 	def fit(self, train_path):
 		"""Train images in train_path"""
 
-		if self.verbose:
-			print("Fetch train images....")
+		if not self.is_reuse:
+			if self.verbose:
+				print("Fetch train images....")
 
-		images_dict, n_images = self.__get_files(train_path, True)
+			images_dict, n_images = self.__get_files(train_path, True)
 
-		labels = np.array([])
-		features = []
-		encoded = 0
-		for label, images in images_dict.items():
-			self._labels_dict[str(encoded)] = label
+			features = []
+			encoded = 0
+			for label, images in images_dict.items():
+				self._labels_dict[str(encoded)] = label
+
+				if self.verbose:
+					print("Computing features for", label)
+
+				for image in images:
+					self._labels = np.append(self._labels, encoded)
+					kp, des = self.__extract_features(image)
+					features.append(des)
+
+				encoded += 1
+
+			features_v = self.__formart_features(features)
 
 			if self.verbose:
-				print("Computing features for", label)
+				print("Clustering...")
 
-			for image in images:
-				labels = np.append(labels, encoded)
-				kp, des = self.__extract_features(image)
-				features.append(des)
-
-			encoded += 1
-
-		features_v = self.__formart_features(features)
-
-		if self.verbose:
-			print("Clustering...")
-
-		if self.is_reuse:
-			kmeans_bags = self._kmeans.predict(features_v)
-		else:
 			kmeans_bags = self._kmeans.fit_predict(features_v)
 
+			self._histogram = np.array([np.zeros(self.n_bags) for i in range(n_images)])
+			count = 0
+			for i in range(n_images):
+				if features[i] is not None:
+					ll = len(features[i])
+					for j in range(ll):
+						idx = kmeans_bags[count + j]
+						self._histogram[i][idx] += 1
+					count += ll
+
 			if self.verbose:
-				pickle.dump(self._kmeans, open("models/kmeans.sav", 'wb'))
+				print("Vocabulary Histogram Generated")
+				print("Normalize...")
 
-		self._histogram = np.array([np.zeros(self.n_bags) for i in range(n_images)])
-		count = 0
-		for i in range(n_images):
-			if features[i] is not None:
-				ll = len(features[i])
-				for j in range(ll):
-					idx = kmeans_bags[count + j]
-					self._histogram[i][idx] += 1
-				count += ll
+			self._histogram = self._scale.fit_transform(self._histogram)
 
-		if self.verbose:
-			print("Vocabulary Histogram Generated")
-			print("Normalize...")
+			if self.verbose:
+				print("Histogram shape", self._histogram.shape)
+				print("Trainning...")
 
-		self._histogram = self._scale.fit_transform(self._histogram)
-
-		if self.verbose:
-			print("Histogram shape", self._histogram.shape)
-			print("Trainning...")
-
-		self.estimator.fit(self._histogram, labels)
+		self.estimator.fit(self._histogram, self._labels)
 
 		if self.verbose:
 			print(self.estimator)
-			pickle.dump(self.estimator, open("models/estimator.sav", 'wb'))
 			print("Trainning done!")
 
 	def fit_score(self, train_path, test_path):
@@ -231,6 +233,15 @@ class BOVW:
 		plt.xticks(x + 0.4, x)
 		plt.show()
 
+	def persist(self):
+		print("Persisting...")
+		np.save("models/X.npy", self._histogram)
+		np.save("models/y.npy", self._labels)
+		np.save("models/y_dict.npy", self._labels_dict)
+		pickle.dump(self._kmeans, open("models/kmeans.sav", 'wb'))
+		pickle.dump(self.estimator, open("models/estimator.sav", 'wb'))
+		print("Done persist!")
+
 	def __formart_features(self, features):
 		"""Format features to vertical"""
 
@@ -292,7 +303,8 @@ class BOVW:
 				if n_sample < k:
 					k = n_sample
 				images[label] = rand.sample(images[label], k)
-				print("Sampling category", label, k, " images")
+				if self.verbose:
+					print("Sampling category", label, k, " images")
 				count += k
 
 		if self.verbose:
@@ -300,21 +312,21 @@ class BOVW:
 
 		return images, count
 
-	def __resample(self, images_dict):
-		"""Resample dataset to prevent imbalanced data"""
-
-		# Get class have max images
-		n = np.mean([len(images_dict[key]) for key in images_dict.keys()])
-		count = 0
-		for key in images_dict.keys():
-			k = len(images_dict[key])
-			if k > n:
-				k = int(np.ceil((k + n) / 10))
-				# Resample some images
-				images_dict[key] = sklearn.utils.resample(images_dict[key], n_samples=k, random_state=self.random_state)
-
-			if self.verbose:
-				print("Resample", key, ":", k, "images")
-			count += k
-
-		return images_dict, count
+	# def __resample(self, images_dict):
+	# 	"""Resample dataset to prevent imbalanced data"""
+	#
+	# 	# Get class have max images
+	# 	n = np.mean([len(images_dict[key]) for key in images_dict.keys()])
+	# 	count = 0
+	# 	for key in images_dict.keys():
+	# 		k = len(images_dict[key])
+	# 		if k > n:
+	# 			k = int(np.ceil((k + n) / 10))
+	# 			# Resample some images
+	# 			images_dict[key] = sklearn.utils.resample(images_dict[key], n_samples=k, random_state=self.random_state)
+	#
+	# 		if self.verbose:
+	# 			print("Resample", key, ":", k, "images")
+	# 		count += k
+	#
+	# 	return images_dict, count
