@@ -12,18 +12,15 @@ from sklearn.metrics import precision_recall_fscore_support
 
 class BOVW:
 
-	def __init__(self, estimator, n_bags=200, max_features_per_image=200,
-	             edge_threshold=50, contrast_threshold=0.02, tol=0.001,
+	def __init__(self, estimator, xfeat, n_bags=200, tol=0.001,
 	             is_resample=False, resample_factor=3.0, probability=False,
 	             verbose=False, random_state=None, color="HSV",
 	             is_reuse=False, class_threshold=None):
 
 		# Default variables
 		self.estimator = estimator
+		self.xfeat = xfeat
 		self.n_bags = n_bags
-		self.max_features_per_image = max_features_per_image
-		self.edge_threshold = edge_threshold
-		self.contrast_threshold = contrast_threshold
 		self.tol = tol
 		self.is_resample = is_resample
 		self.resample_factor = resample_factor
@@ -46,10 +43,6 @@ class BOVW:
 		self.is_reuse = is_reuse
 		self.class_threshold = class_threshold
 
-		# protecte variables
-		self._xfeat = cv2.xfeatures2d.SIFT_create(self.max_features_per_image,
-		                                          edgeThreshold=self.edge_threshold,
-		                                          contrastThreshold=self.contrast_threshold)
 		if self.is_reuse:
 			try:
 				self._histogram = np.load("models/X.npy")
@@ -244,6 +237,10 @@ class BOVW:
 		pickle.dump(self.estimator, open("models/estimator.sav", 'wb'))
 		print("Done persist!")
 
+	def save_model(self):
+		pickle.dump(self, open("models/bovw.sav", "wb"))
+		print("Saved to models/bovw.sav")
+
 	def __formart_features(self, features):
 		"""Format features to vertical"""
 
@@ -263,8 +260,8 @@ class BOVW:
 		if self.color is not None:
 			image_temp = cv2.cvtColor(image, self.color)
 
-		kp = self._xfeat.detect(image_temp, None)
-		return self._xfeat.compute(image, kp)
+		kp = self.xfeat.detect(image_temp, None)
+		return self.xfeat.compute(image, kp)
 
 	def __get_files(self, path, is_balance=False):
 		"""Get images dictionary from path
@@ -313,22 +310,3 @@ class BOVW:
 			print("Fetched", count, "images")
 
 		return images, count
-
-	# def __resample(self, images_dict):
-	# 	"""Resample dataset to prevent imbalanced data"""
-	#
-	# 	# Get class have max images
-	# 	n = np.mean([len(images_dict[key]) for key in images_dict.keys()])
-	# 	count = 0
-	# 	for key in images_dict.keys():
-	# 		k = len(images_dict[key])
-	# 		if k > n:
-	# 			k = int(np.ceil((k + n) / 10))
-	# 			# Resample some images
-	# 			images_dict[key] = sklearn.utils.resample(images_dict[key], n_samples=k, random_state=self.random_state)
-	#
-	# 		if self.verbose:
-	# 			print("Resample", key, ":", k, "images")
-	# 		count += k
-	#
-	# 	return images_dict, count
