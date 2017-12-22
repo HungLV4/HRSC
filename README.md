@@ -9,3 +9,7 @@ Bộ dữ liệu được chia ra thành 2 phần train/val và test theo tỉ l
 
 Yêu cầu xây dựng bộ phân lớp tàu theo các class và layer
 
+### Kết quả thu được
+- Trên tập train là 82%
+- Trên tập test là 75%
+- Kết quả thu được trên toàn layer 1 gồm 4 class 2, 3, 4 và 27
