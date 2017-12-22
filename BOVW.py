@@ -6,7 +6,7 @@ import sklearn.utils
 
 from glob import glob
 from sklearn.cluster import KMeans
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import precision_recall_fscore_support
 
 
@@ -61,7 +61,7 @@ class BOVW:
 			self._kmeans = KMeans(n_clusters=self.n_bags,
 			                      tol=self.tol,
 			                      random_state=self.random_state)
-			self._scale = StandardScaler()
+			self._scale = MinMaxScaler((-1, 1))
 
 	def fit(self, train_path):
 		"""Train images in train_path"""
