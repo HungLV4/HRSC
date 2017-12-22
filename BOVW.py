@@ -11,6 +11,56 @@ from sklearn.metrics import precision_recall_fscore_support
 
 
 class BOVW:
+	"""Mô hình Bag Of Visual Word cho bài toán phân loại ảnh
+
+	Các ảnh trainning được đưa vào models là các ảnh được cắt theo bounding box,
+	và xoay nằm ngang, loại bỏ hoàn toàn nhiễu. Sau đó sẽ resample từ tập train
+	(để khắc phục trường hợp data phân bố nghiêng).
+
+	Các class đều là của layer 1:
+		classID/
+			100000002/: 168 ảnh (gồm tàu sân bay cỡ lớn và cỡ bé)
+			100000003/: 686 ảnh (gồm tàu quân sự có sân bay trực thăng ở đít)
+			100000004/: 413 ảnh (gồm các tàu linh tinh, đánh cá)
+			100000027/: 45 ảnh (chỉ có tàu ngầm)
+
+	Khi resample chỉ lấy 1 lượng ảnh nhất định ở các class, không lấy tất
+
+	Parameters
+    ----------
+    estimator : classifier
+        SVC, Logistic Regression, RandomForest
+
+    xfeat : object phụ trách extract features từ ảnh
+        Có thể là 1 trong 3 dạng sau
+            - cv2.xfeatures2d.SIFT_create(250, edgeThreshold=50, contrastThreshold=0.02)
+			- cv2.xfeatures2d.SURF_create(0, extended=True)
+			- cv2.ORB_create(patchSize=64, edgeThreshold=10, nlevels=8)
+		Thường phải thử trước
+
+	n_bags : Số lượng bag cho mô hình BOW tương ứng với số features
+		Các features được trích xuất từ ảnh sẽ được clustering bằng Kmeans vào đây
+	tol : hệ số lỗi của Kmeans
+		Càng lớn chạy càng nhanh nhưng có thể không hội tụ
+	is_resample : boolean
+		Có thực hiện resample hay không?
+	resample_factor : hệ số resample
+		min_data_number => số lượng data nhỏ nhất trong class
+		taken_data_number = (current_data_number + min_data_number) / resample_factor
+		=> lấy của class hiện tại (taken_data_number) ảnh
+	probability : boolean
+		Có hiển thị raw predict không?
+	verbose : boolean
+		Có hiển thị log hay không?
+	random_state : integer
+		Seed cho các hàm random
+	color : "HSV", "YUV", "HLS", None
+		Chuyển ảnh gốc sang màu tương ứng trước khi trích xuất features
+	is_reuse : boolean
+		True nếu muốn dùng lại data trainning (sau khi preprocessing) để train và thử các classifier khác nhau
+	class_threshold : array()
+		Đặt ngưỡng để gán label cho 1 bức ảnh khi test, sử dụng cùng raw predict
+	"""
 
 	def __init__(self, estimator, xfeat, n_bags=200, tol=0.001,
 	             is_resample=False, resample_factor=3.0, probability=False,
@@ -45,11 +95,12 @@ class BOVW:
 
 		if self.is_reuse:
 			try:
-				self._histogram = np.load("models/X.npy")
-				self._labels = np.load("models/y.npy")
-				self._labels_dict = np.load("models/y_dict.npy").item()
-				self._kmeans = pickle.load(open("models/kmeans.sav", 'rb'))
-				self._scale = pickle.load(open("models/scale.sav", "rb"))
+				# Load train data đã được tiền xử lý
+				self._histogram = np.load("models/X.npy")   # features
+				self._labels = np.load("models/y.npy")  # label
+				self._labels_dict = np.load("models/y_dict.npy").item() # label encode
+				self._kmeans = pickle.load(open("models/kmeans.sav", 'rb'))  # thông số kmeans
+				self._scale = pickle.load(open("models/scale.sav", "rb"))   # thông số của scale
 			except Exception as e:
 				print("Can't load local file!", e)
 				self.is_reuse = False
@@ -61,7 +112,7 @@ class BOVW:
 			self._kmeans = KMeans(n_clusters=self.n_bags,
 			                      tol=self.tol,
 			                      random_state=self.random_state)
-			self._scale = MinMaxScaler((-1, 1))
+			self._scale = MinMaxScaler((-1, 1))  # Qua thử nghiệm thấy scale trong khoảng (-1,1) tốt hơn (0,1)
 
 	def fit(self, train_path):
 		"""Train images in train_path"""
@@ -74,6 +125,7 @@ class BOVW:
 
 			features = []
 			encoded = 0
+			# Thực hiện encode label
 			for label, images in images_dict.items():
 				self._labels_dict[str(encoded)] = label
 
@@ -82,18 +134,21 @@ class BOVW:
 
 				for image in images:
 					self._labels = np.append(self._labels, encoded)
-					kp, des = self.__extract_features(image)
+					kp, des = self.__extract_features(image)    # Lấy features
 					features.append(des)
 
 				encoded += 1
 
+			# Sắp xếp lại các features
 			features_v = self.__formart_features(features)
 
 			if self.verbose:
 				print("Clustering...")
 
+			# Phân cụm các features => tương dương với giảm chiều
 			kmeans_bags = self._kmeans.fit_predict(features_v)
 
+			# Với mỗi ảnh, xem xem 1 ảnh với mỗi bags có bao nhiêu features thuộc vào
 			self._histogram = np.array([np.zeros(self.n_bags) for i in range(n_images)])
 			count = 0
 			for i in range(n_images):
@@ -108,21 +163,25 @@ class BOVW:
 				print("Vocabulary Histogram Generated")
 				print("Normalize...")
 
+			# Scale features
 			self._histogram = self._scale.fit_transform(self._histogram)
 
 			if self.verbose:
 				print("Histogram shape", self._histogram.shape)
 				print("Trainning...")
 
+		# Train classifier
 		self.estimator.fit(self._histogram, self._labels)
 
 		if self.verbose:
 			print(self.estimator)
 			print("Trainning done!")
 
-	def fit_score(self, train_path, test_path):
+	def fit_score(self, train_path):
+		"""Độ chính xác trên tập train"""
+
 		self.fit(train_path)
-		self.score(test_path)
+		return self.score(train_path)
 
 	def predict(self, image):
 		"""Predict a single image"""
@@ -136,6 +195,7 @@ class BOVW:
 			for each in test_res:
 				vocab[each] += 1
 
+			# Scale data
 			vocab = self._scale.transform(vocab.reshape(1, -1) / 1.0)
 
 			if self.probability:
@@ -147,6 +207,7 @@ class BOVW:
 			else:
 				final_predict = self.estimator.predict(vocab)[0]
 
+			# Lấy ra tên class dựa vào encode
 			name = self._labels_dict[str(int(final_predict))]
 
 		return name, final_predict, raw_predict
@@ -185,6 +246,8 @@ class BOVW:
 		return true / count
 
 	def score_percision_recall(self, test_path):
+		"""Tính toán percision và recall"""
+
 		if self.verbose:
 			print("Fetch test images...")
 
@@ -228,6 +291,8 @@ class BOVW:
 		plt.show()
 
 	def persist(self):
+		"""Lưu train data sau khi preprocessing, đặt is_reuse là True để sử dụng lại"""
+
 		print("Persisting...")
 		np.save("models/X.npy", self._histogram)
 		np.save("models/y.npy", self._labels)
@@ -238,6 +303,10 @@ class BOVW:
 		print("Done persist!")
 
 	def save_model(self):
+		"""Lưu model để nộp
+		(không lưu được xfeat)
+		"""
+
 		pickle.dump(self, open("models/bovw.sav", "wb"))
 		print("Saved to models/bovw.sav")
 
