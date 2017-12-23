@@ -24,7 +24,7 @@ Yêu cầu xây dựng bộ phân lớp tàu theo các class và layer
 ![Resample cnf](reports/old.png)
 
 #### Balanced weight
-- Acc = ___82%___
+- Acc = ___82.59%___
 - Confusion Matrix: 
 
 ![Balanced cnf](reports/new.png)
