@@ -121,7 +121,7 @@ class BOVW:
 			if self.verbose:
 				print("Fetch train images....")
 
-			images_dict, n_images = self.__get_files(train_path, True)
+			images_dict, n_images = self.__get_files(train_path)
 
 			features = []
 			encoded = 0
@@ -176,6 +176,96 @@ class BOVW:
 		if self.verbose:
 			print(self.estimator)
 			print("Trainning done!")
+
+	def cross_validation(self, train_path, k_fold=5):
+		"""Train images in train_path"""
+
+		if self.verbose:
+			print("Fetch train images....")
+
+		images_dict, n_images = self.__get_files(train_path, False)
+
+		features = []
+		encoded = 0
+		# Thực hiện encode label
+		for label, images in images_dict.items():
+			self._labels_dict[str(encoded)] = label
+
+			if self.verbose:
+				print("Computing features for", label)
+
+			for image in images:
+				self._labels = np.append(self._labels, encoded)
+				kp, des = self.__extract_features(image)  # Lấy features
+				features.append(des)
+
+			encoded += 1
+
+		score_arr = []
+
+		print("Cross Validation...")
+		from random import randrange
+		dataset = zip(features, self._labels)
+		dataset_split = []
+		dataset_copy = list(dataset)
+		fold_size = int(n_images / k_fold)
+		for i in range(k_fold):
+			fold = []
+			while len(fold) < fold_size:
+				index = randrange(len(dataset_copy))
+				fold.append(dataset_copy.pop(index))
+			dataset_split.append(fold)
+
+		# features_cv, labels_cv = sklearn.utils.resample(features, self._labels, n_samples=k_fold)
+
+		index = 1
+		for ds in dataset_split:
+			features = []
+			labels = []
+			for d in ds:
+				f, l = zip(d)
+				features.append(f)
+				labels.append(l)
+			features = np.asarray(features)
+			labels = np.asarray(labels)
+
+			print("Fold", index)
+
+			# Sắp xếp lại các features
+			features_v = self.__formart_features(features)
+
+			n_images = len(features)
+
+			# Phân cụm các features => tương dương với giảm chiều
+			kmeans = self._kmeans
+			kmeans_bags = kmeans.fit_predict(features_v)
+
+			# Với mỗi ảnh, xem xem 1 ảnh với mỗi bags có bao nhiêu features thuộc vào
+			histogram = np.array([np.zeros(self.n_bags) for i in range(n_images)])
+			count = 0
+			for i in range(n_images):
+				if features[i] is not None:
+					ll = len(features[i])
+					for j in range(ll):
+						idx = kmeans_bags[count + j]
+						histogram[i][idx] += 1
+					count += ll
+
+			# Scale features
+			scale = self._scale
+			histogram = scale.fit_transform(histogram)
+
+			# Train classifier
+			estimator = self.estimator
+			estimator.fit(histogram, labels)
+			score_arr.append(estimator.score(histogram, labels))
+
+			if self.verbose:
+				print("Done fold", index)
+
+			index += 1
+
+		return score_arr
 
 	def fit_score(self, train_path):
 		"""Độ chính xác trên tập train"""
@@ -332,11 +422,13 @@ class BOVW:
 		kp = self.xfeat.detect(image_temp, None)
 		return self.xfeat.compute(image, kp)
 
-	def __get_files(self, path, is_balance=False):
+	def __get_files(self, path, is_balance=None):
 		"""Get images dictionary from path
 			Keys is label
 			Values is list of images
 		"""
+		if is_balance is None:
+			is_balance = self.is_resample
 
 		images = {}
 		n_sample, count = 0, 0

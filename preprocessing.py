@@ -146,7 +146,7 @@ for file in os.listdir(annotation_path):
 				image = image[y_min:y_max, x_min:x_max]
 
 				# Save image to correct class path
-				image_path = "../images/" + dest + "" + str(classID)
+				image_path = "images/" + dest + "" + str(classID)
 				if classID not in path_dict:
 					ensure_dir(image_path)
 					path_dict.append(classID)

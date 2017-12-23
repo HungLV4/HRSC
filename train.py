@@ -17,14 +17,14 @@ bovw = BOVW(clf,
             feat,
             n_bags=250,
             tol=0.01,
-            is_resample=True,
-            is_reuse=True,
+            is_resample=False,
+            is_reuse=False,
             verbose=True,
             color=None)
 
 # Train score: 82%
-acc = bovw.fit_score("images/train/")
-print(acc)
+# acc = bovw.fit_score("images/train/")
+# print(acc)
 
 # Test score: 75%
 # bovw.fit("images/train/")
@@ -33,6 +33,10 @@ print(acc)
 
 # Percision & Recall
 # print(bovw.score_percision_recall("images/test/"))
+
+# Cross validation
+acc = bovw.cross_validation("images/train/")
+print(acc)
 
 # Save for is_reuse = True
 # bovw.persist()
