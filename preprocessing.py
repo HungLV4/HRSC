@@ -45,17 +45,12 @@ for child in root:
 
 		break
 
-# TODO: Edit this
-# if create images for testing, only cut bounding box
-# if create images for trainning, do some preprocessing
-src = "Test"    # "Test" or ""
-
 # Image after preprocessing
 dest = "test/"  # "test/" or "train/"
 
 # Dir path for image preprocessing
-annotation_path = "../../HRSC2016/" + src + "Annotation"
-images_path = "../../HRSC2016/" + src + "Images"
+annotation_path = "../HRSCTest/Annotations"
+images_path = "../HRSCTest/AllImages"
 
 path_dict = []  # save class dir had been created, so we not have to create again
 # (w_mean, h_mean) = (128, 128)
@@ -127,20 +122,19 @@ for file in os.listdir(annotation_path):
 				# Rotate and crop box
 				image_bmp = image_name.replace(".xml", ".bmp")
 				image = cv2.imread(images_path + "/" + image_bmp)
-				if dest == "train/":
-					(h, w) = image.shape[:2]
-					image = rotate.rotate_cus(image, angle, (cx, cy))
-					(cx, cy) = rotate.rotate_point(cx, cy, cx, cy, -angle)
-					(hx, hy) = rotate.rotate_point(hx, hy, cx, cy, -angle)
-					x_min = math.ceil(cx - (hx - cx))
-					x_max = math.ceil(hx)
-					y_min = math.ceil(cy - 0.25 * (hx - cx))
-					y_max = math.ceil(hy + 0.25 * (hx - cx))
+				(h, w) = image.shape[:2]
+				image = rotate.rotate_cus(image, angle, (cx, cy))
+				(cx, cy) = rotate.rotate_point(cx, cy, cx, cy, -angle)
+				(hx, hy) = rotate.rotate_point(hx, hy, cx, cy, -angle)
+				x_min = math.ceil(cx - (hx - cx))
+				x_max = math.ceil(hx)
+				y_min = math.ceil(cy - 0.25 * (hx - cx))
+				y_max = math.ceil(hy + 0.25 * (hx - cx))
 
-					if x_min < 0:
-						x_min = 0
-					if y_min < 0:
-						y_min = 0
+				if x_min < 0:
+					x_min = 0
+				if y_min < 0:
+					y_min = 0
 
 				# Cut
 				image = image[y_min:y_max, x_min:x_max]
@@ -152,69 +146,23 @@ for file in os.listdir(annotation_path):
 					path_dict.append(classID)
 
 				# Create image
-				if dest == "train/":
-					image_root = image
+				image_root = image
 
-					(h, w) = image.shape[:2]
-					a = w * 1.0 / h
-					w_mean, h_mean = None, None
-					if h > 250:
-						h_mean = 250
-						w_mean = math.ceil(a * h_mean)
-						w = w_mean
-					if w > 250:
-						w_mean = 250
-						h_mean = math.ceil(w_mean / a)
+				(h, w) = image.shape[:2]
+				a = w * 1.0 / h
+				w_mean, h_mean = None, None
+				if h > 250:
+					h_mean = 250
+					w_mean = math.ceil(a * h_mean)
+					w = w_mean
+				if w > 250:
+					w_mean = 250
+					h_mean = math.ceil(w_mean / a)
 
-					if w_mean is not None and h_mean is not None:
-						image = cv2.resize(image, (w_mean, h_mean), interpolation=cv2.INTER_AREA)
+				if w_mean is not None and h_mean is not None:
+					image = cv2.resize(image, (w_mean, h_mean), interpolation=cv2.INTER_AREA)
 
-					# (h, w) = image.shape[:2]
-					# while h <= 30 or w <= 30:
-					# 	image = cv2.resize(image, (w * 2, h * 2), interpolation=cv2.INTER_AREA)
-					# 	(h, w) = image.shape[:2]
-
-					# Rotate to generate more images
-					cv2.imwrite(image_path + "/" + objectID + "_0.png", image)
-
-					# image = image_root
-					# image = rotate.rotate_about_center(image, 90)
-					# (h, w) = image.shape[:2]
-					#
-					# y_min = math.floor(h / 6)
-					# y_max = 5 * y_min
-					# x_min = math.floor(w / 6)
-					# x_max = 5 * x_min
-					# image = image[y_min:y_max, x_min:x_max]
-
-					# (h, w) = image.shape[:2]
-					# while h <= 30 or w <= 30:
-					# 	image = cv2.resize(image, (w * 2, h * 2), interpolation=cv2.INTER_AREA)
-					# 	(h, w) = image.shape[:2]
-
-					# cv2.imwrite(image_path + "/" + objectID + "_1.png", image)
-				else:
-					(h, w) = image.shape[:2]
-					a = w * 1.0 / h
-					w_mean, h_mean = None, None
-					if h > 250:
-						h_mean = 250
-						w_mean = math.ceil(a * h_mean)
-						w = w_mean
-					if w > 250:
-						w_mean = 250
-						h_mean = math.ceil(w_mean / a)
-
-					if w_mean is not None and h_mean is not None:
-						image = cv2.resize(image, (w_mean, h_mean), interpolation=cv2.INTER_AREA)
-
-					cv2.imwrite(image_path + "/" + objectID + "_0.png", image)
-				# if dest == "train/":
-				# 	angle_arr = [0]
-				# else:
-				# 	angle_arr = [0]
-				# for a in angle_arr:
-				# 	image_m = rotate.rotate_about_center(image, a)
-				# 	cv2.imwrite(image_path + "/" + objectID + "_" + str(a) + ".png", image_m)
+				# Rotate to generate more images
+				cv2.imwrite(image_path + "/" + objectID + "_0.png", image)
 
 			break

@@ -3,11 +3,12 @@ import pickle
 import cv2
 import matplotlib.pyplot as plt
 import sklearn.utils
+import itertools
 
 from glob import glob
-from sklearn.cluster import KMeans
+from sklearn.cluster import MiniBatchKMeans, KMeans
 from sklearn.preprocessing import MinMaxScaler
-from sklearn.metrics import precision_recall_fscore_support
+from sklearn.metrics import confusion_matrix, accuracy_score
 
 
 class BOVW:
@@ -40,16 +41,12 @@ class BOVW:
 
 	n_bags : Số lượng bag cho mô hình BOW tương ứng với số features
 		Các features được trích xuất từ ảnh sẽ được clustering bằng Kmeans vào đây
-	tol : hệ số lỗi của Kmeans
-		Càng lớn chạy càng nhanh nhưng có thể không hội tụ
 	is_resample : boolean
 		Có thực hiện resample hay không?
 	resample_factor : hệ số resample
 		min_data_number => số lượng data nhỏ nhất trong class
 		taken_data_number = (current_data_number + min_data_number) / resample_factor
 		=> lấy của class hiện tại (taken_data_number) ảnh
-	probability : boolean
-		Có hiển thị raw predict không?
 	verbose : boolean
 		Có hiển thị log hay không?
 	random_state : integer
@@ -58,23 +55,21 @@ class BOVW:
 		Chuyển ảnh gốc sang màu tương ứng trước khi trích xuất features
 	is_reuse : boolean
 		True nếu muốn dùng lại data trainning (sau khi preprocessing) để train và thử các classifier khác nhau
-	class_threshold : array()
-		Đặt ngưỡng để gán label cho 1 bức ảnh khi test, sử dụng cùng raw predict
+	mini_batches : boolean
+		True nếu muốn sử dụng MiniBatchesKmeans (phù hợp với data lớn) và False nếu muốn sử dụng Kmeans
 	"""
 
-	def __init__(self, estimator, xfeat, n_bags=200, tol=0.001,
-	             is_resample=False, resample_factor=3.0, probability=False,
-	             verbose=False, random_state=None, color="HSV",
-	             is_reuse=False, class_threshold=None):
+	def __init__(self, estimator, xfeat, n_bags=200,
+	             is_resample=False, resample_factor=3.0,
+	             verbose=False, random_state=None,
+	             color=None, is_reuse=False, mini_batches=False):
 
 		# Default variables
 		self.estimator = estimator
 		self.xfeat = xfeat
 		self.n_bags = n_bags
-		self.tol = tol
 		self.is_resample = is_resample
 		self.resample_factor = resample_factor
-		self.probability = probability
 		self.verbose = verbose
 		if random_state is None:
 			self.random_state = int((1234.0 - 2.0) * np.random.random_sample() + 2.0)
@@ -91,16 +86,16 @@ class BOVW:
 		else:
 			self.color = None
 		self.is_reuse = is_reuse
-		self.class_threshold = class_threshold
+		self.mini_batches = mini_batches
 
 		if self.is_reuse:
 			try:
 				# Load train data đã được tiền xử lý
-				self._histogram = np.load("models/X.npy")   # features
+				self._histogram = np.load("models/X.npy")  # features
 				self._labels = np.load("models/y.npy")  # label
-				self._labels_dict = np.load("models/y_dict.npy").item() # label encode
+				self._labels_dict = np.load("models/y_dict.npy").item()  # label encode
 				self._kmeans = pickle.load(open("models/kmeans.sav", 'rb'))  # thông số kmeans
-				self._scale = pickle.load(open("models/scale.sav", "rb"))   # thông số của scale
+				self._scale = pickle.load(open("models/scale.sav", "rb"))  # thông số của scale
 			except Exception as e:
 				print("Can't load local file!", e)
 				self.is_reuse = False
@@ -109,10 +104,13 @@ class BOVW:
 			self._histogram = None
 			self._labels = np.array([])
 			self._labels_dict = {}
-			self._kmeans = KMeans(n_clusters=self.n_bags,
-			                      tol=self.tol,
-			                      random_state=self.random_state)
-			self._scale = MinMaxScaler((-1, 1))  # Qua thử nghiệm thấy scale trong khoảng (-1,1) tốt hơn (0,1)
+			if self.mini_batches:
+				self._kmeans = MiniBatchKMeans(n_clusters=self.n_bags,
+			                                batch_size=20000,
+			                                random_state=self.random_state)
+			else:
+				self._kmeans = KMeans(n_clusters=self.n_bags, random_state=self.random_state)
+			self._scale = MinMaxScaler((-1, 1))  # Qua thử nghiệm thấy scale trong khoảng (-1,1) tốt nhất
 
 	def fit(self, train_path):
 		"""Train images in train_path"""
@@ -134,7 +132,7 @@ class BOVW:
 
 				for image in images:
 					self._labels = np.append(self._labels, encoded)
-					kp, des = self.__extract_features(image)    # Lấy features
+					kp, des = self.__extract_features(image)  # Lấy features
 					features.append(des)
 
 				encoded += 1
@@ -146,7 +144,20 @@ class BOVW:
 				print("Clustering...")
 
 			# Phân cụm các features => tương dương với giảm chiều
-			kmeans_bags = self._kmeans.fit_predict(features_v)
+			if self.mini_batches:
+				k = 20
+				each = int(features_v.shape[0] / k) + 10
+				print("Data per fold", each)
+				start = 0
+				for i in range(k):
+					self._kmeans.partial_fit(features_v[start:start + each])
+					start += each
+				if start < each:
+					print("Clustering error!")
+					return
+				kmeans_bags = self._kmeans.predict(features_v)
+			else:
+				kmeans_bags = self._kmeans.fit_predict(features_v)
 
 			# Với mỗi ảnh, xem xem 1 ảnh với mỗi bags có bao nhiêu features thuộc vào
 			self._histogram = np.array([np.zeros(self.n_bags) for i in range(n_images)])
@@ -177,107 +188,11 @@ class BOVW:
 			print(self.estimator)
 			print("Trainning done!")
 
-	def cross_validation(self, train_path, k_fold=5):
-		"""Train images in train_path"""
-
-		if self.verbose:
-			print("Fetch train images....")
-
-		images_dict, n_images = self.__get_files(train_path, False)
-
-		features = []
-		encoded = 0
-		# Thực hiện encode label
-		for label, images in images_dict.items():
-			self._labels_dict[str(encoded)] = label
-
-			if self.verbose:
-				print("Computing features for", label)
-
-			for image in images:
-				self._labels = np.append(self._labels, encoded)
-				kp, des = self.__extract_features(image)  # Lấy features
-				features.append(des)
-
-			encoded += 1
-
-		score_arr = []
-
-		print("Cross Validation...")
-		from random import randrange
-		dataset = zip(features, self._labels)
-		dataset_split = []
-		dataset_copy = list(dataset)
-		fold_size = int(n_images / k_fold)
-		for i in range(k_fold):
-			fold = []
-			while len(fold) < fold_size:
-				index = randrange(len(dataset_copy))
-				fold.append(dataset_copy.pop(index))
-			dataset_split.append(fold)
-
-		# features_cv, labels_cv = sklearn.utils.resample(features, self._labels, n_samples=k_fold)
-
-		index = 1
-		for ds in dataset_split:
-			features = []
-			labels = []
-			for d in ds:
-				f, l = zip(d)
-				features.append(f)
-				labels.append(l)
-			features = np.asarray(features)
-			labels = np.asarray(labels)
-
-			print("Fold", index)
-
-			# Sắp xếp lại các features
-			features_v = self.__formart_features(features)
-
-			n_images = len(features)
-
-			# Phân cụm các features => tương dương với giảm chiều
-			kmeans = self._kmeans
-			kmeans_bags = kmeans.fit_predict(features_v)
-
-			# Với mỗi ảnh, xem xem 1 ảnh với mỗi bags có bao nhiêu features thuộc vào
-			histogram = np.array([np.zeros(self.n_bags) for i in range(n_images)])
-			count = 0
-			for i in range(n_images):
-				if features[i] is not None:
-					ll = len(features[i])
-					for j in range(ll):
-						idx = kmeans_bags[count + j]
-						histogram[i][idx] += 1
-					count += ll
-
-			# Scale features
-			scale = self._scale
-			histogram = scale.fit_transform(histogram)
-
-			# Train classifier
-			estimator = self.estimator
-			estimator.fit(histogram, labels)
-			score_arr.append(estimator.score(histogram, labels))
-
-			if self.verbose:
-				print("Done fold", index)
-
-			index += 1
-
-		return score_arr
-
-	def fit_score(self, train_path):
-		"""Độ chính xác trên tập train"""
-
-		self.fit(train_path)
-		return self.score(train_path)
-
-	def predict(self, image):
+	def predict_one(self, image):
 		"""Predict a single image"""
 
 		kp, des = self.__extract_features(image)
-		name, final_predict, raw_predict = None, None, None
+		name, predict = None, None
 		if len(kp) != 0:
 			vocab = np.array([0 for i in range(self.n_bags)])
 			test_res = self._kmeans.predict(des)
@@ -288,27 +203,24 @@ class BOVW:
 			# Scale data
 			vocab = self._scale.transform(vocab.reshape(1, -1) / 1.0)
 
-			if self.probability:
-				raw_predict = self.estimator.predict_proba(vocab)
-				if self.class_threshold is None:
-					final_predict = np.argmax(raw_predict[0])
-				else:
-					final_predict = np.argmax(raw_predict[0] - self.class_threshold)
-			else:
-				final_predict = self.estimator.predict(vocab)[0]
+			predict = self.estimator.predict(vocab)[0]
 
 			# Lấy ra tên class dựa vào encode
-			name = self._labels_dict[str(int(final_predict))]
+			name = self._labels_dict[str(int(predict))]
 
-		return name, final_predict, raw_predict
+		return name, predict
 
 	def score(self, test_path):
+		y_true, y_pred, acc = self.__accuracy(test_path)
+		return acc
+
+	def score_raw(self, test_path):
 		"""Test images in train_path"""
 
 		if self.verbose:
 			print("Fetch test images...")
 
-		images_dict, n_images = self.__get_files(test_path)
+		images_dict, n_images = self.__get_files(test_path, False)
 
 		true, count = 0.0, 0.0
 		for label, images in images_dict.items():
@@ -316,50 +228,33 @@ class BOVW:
 				print("Processing", label)
 
 			for img in images:
-				name, target, raw_predict = self.predict(img)
+				name, target = self.predict_one(img)
 
 				if name == label:
 					if self.verbose:
-						if self.probability:
-							print("Predict", label, name, raw_predict, "TRUE")
-						else:
-							print("Predict", label, name, "TRUE")
+						print("Predict", label, name, "TRUE")
 					true += 1.0
 				elif self.verbose:
-					if self.probability:
-						print("Predict", label, name, raw_predict)
-					else:
-						print("Predict", label, name)
+					print("Predict", label, name)
 
 				count += 1.0
 
 		return true / count
 
-	def score_percision_recall(self, test_path):
+	def confusion_matrix(self, test_path, is_normalize=True):
 		"""Tính toán percision và recall"""
 
-		if self.verbose:
-			print("Fetch test images...")
+		y_true, y_pred, acc = self.__accuracy(test_path)
 
-		images_dict, n_images = self.__get_files(test_path)
+		print("Accuracy", acc)
 
-		y_true, y_pred = [], []
-		for label, images in images_dict.items():
-			if self.verbose:
-				print("Processing", label)
-
-			for img in images:
-				name, target, raw_predict = self.predict(img)
-
-				y_true.append(label)
-				y_pred.append(name)
-
-		y_true = np.asarray(y_true)
-		y_pred = np.asarray(y_pred)
-
-		percision, recall, fscore, support = precision_recall_fscore_support(y_true, y_pred, average=None)
-
-		return percision, recall
+		cnf_matrix = confusion_matrix(y_true, y_pred)
+		np.set_printoptions(precision=2)
+		plt.figure()
+		self.__plot_confusion_matrix(cnf_matrix,
+		                             normalize=is_normalize,
+		                             title='Normalized confusion matrix')
+		plt.show()
 
 	def plot_histogram(self, vocab=None):
 		"""Draw histogram"""
@@ -392,13 +287,75 @@ class BOVW:
 		pickle.dump(self.estimator, open("models/estimator.sav", 'wb'))
 		print("Done persist!")
 
-	def save_model(self):
+	def save_model(self, name):
 		"""Lưu model để nộp
 		(không lưu được xfeat)
 		"""
 
-		pickle.dump(self, open("models/bovw.sav", "wb"))
-		print("Saved to models/bovw.sav")
+		temp = self
+		temp.xfeat = None
+		path = "models/" + name + ".sav"
+		pickle.dump(temp, open(path, "wb"))
+		print(path)
+
+	def __accuracy(self, test_path):
+		if self.verbose:
+			print("Fetch test images...")
+
+		images_dict, n_images = self.__get_files(test_path, False)
+
+		y_true, y_pred = [], []
+		for label, images in images_dict.items():
+			if self.verbose:
+				print("Processing", label)
+
+			for img in images:
+				name, target = self.predict_one(img)
+
+				y_true.append(label)
+				y_pred.append(name)
+
+		y_true = np.asarray(y_true)
+		y_pred = np.asarray(y_pred)
+		acc = accuracy_score(y_true, y_pred)
+
+		return y_true, y_pred, acc
+
+	def __plot_confusion_matrix(self, cm, normalize=False, title='Confusion matrix'):
+		"""
+		This function prints and plots the confusion matrix.
+		Normalization can be applied by setting `normalize=True`.
+		"""
+
+		if normalize:
+			cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+			if self.verbose:
+				print("Normalized confusion matrix")
+		else:
+			if self.verbose:
+				print('Confusion matrix, without normalization')
+
+		print(cm)
+
+		classes = self._labels_dict.values()
+
+		plt.imshow(cm, interpolation='nearest')
+		plt.title(title)
+		plt.colorbar()
+		tick_marks = np.arange(len(classes))
+		plt.xticks(tick_marks, classes, rotation=45)
+		plt.yticks(tick_marks, classes)
+
+		fmt = '.2f' if normalize else 'd'
+		thresh = cm.max() / 2.
+		for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
+			plt.text(j, i, format(cm[i, j], fmt),
+			         horizontalalignment="center",
+			         color="white" if cm[i, j] > thresh else "black")
+
+		plt.tight_layout()
+		plt.ylabel('True label')
+		plt.xlabel('Predicted label')
 
 	def __formart_features(self, features):
 		"""Format features to vertical"""

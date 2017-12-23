@@ -9,7 +9,22 @@ Bộ dữ liệu được chia ra thành 2 phần train/val và test theo tỉ l
 
 Yêu cầu xây dựng bộ phân lớp tàu theo các class và layer
 
+### Usage
+- ```preprocessing.py```: thực hiện tiền xử lý dữ liệu
+- ```features.py```: thực hiện thử các phương pháp lấy features
+- ```train.py```: thực hiện train và đánh giá model, sau đó dump để submit
+- ```test.py```: thực hiện load và test model đã dump
+
 ### Kết quả thu được
-- Trên tập train là 82%
-- Trên tập test là 75%
-- Kết quả thu được trên toàn layer 1 gồm 4 class 2, 3, 4 và 27
+
+#### Resample
+- Acc = ___81.25%___
+- Confusion Matrix: 
+
+![Resample cnf](reports/old.png)
+
+#### Balanced weight
+- Acc = ___82%___
+- Confusion Matrix: 
+
+![Balanced cnf](reports/new.png)
