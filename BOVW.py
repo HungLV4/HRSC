@@ -9,6 +9,7 @@ from glob import glob
 from sklearn.cluster import MiniBatchKMeans, KMeans
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import confusion_matrix, accuracy_score
+from sklearn.model_selection import cross_val_score
 
 
 class BOVW:
@@ -119,67 +120,11 @@ class BOVW:
 			if self.verbose:
 				print("Fetch train images....")
 
-			images_dict, n_images = self.__get_files(train_path)
+			images_dict, n_images = self.__get_files([train_path])
 
-			features = []
-			encoded = 0
-			# Thực hiện encode label
-			for label, images in images_dict.items():
-				self._labels_dict[str(encoded)] = label
+			self.build_features(images_dict, n_images)
 
-				if self.verbose:
-					print("Computing features for", label)
-
-				for image in images:
-					self._labels = np.append(self._labels, encoded)
-					kp, des = self.__extract_features(image)  # Lấy features
-					features.append(des)
-
-				encoded += 1
-
-			# Sắp xếp lại các features
-			features_v = self.__formart_features(features)
-
-			if self.verbose:
-				print("Clustering...")
-
-			# Phân cụm các features => tương dương với giảm chiều
-			if self.mini_batches:
-				k = 20
-				each = int(features_v.shape[0] / k) + 10
-				print("Data per fold", each)
-				start = 0
-				for i in range(k):
-					self._kmeans.partial_fit(features_v[start:start + each])
-					start += each
-				if start < each:
-					print("Clustering error!")
-					return
-				kmeans_bags = self._kmeans.predict(features_v)
-			else:
-				kmeans_bags = self._kmeans.fit_predict(features_v)
-
-			# Với mỗi ảnh, xem xem 1 ảnh với mỗi bags có bao nhiêu features thuộc vào
-			self._histogram = np.array([np.zeros(self.n_bags) for i in range(n_images)])
-			count = 0
-			for i in range(n_images):
-				if features[i] is not None:
-					ll = len(features[i])
-					for j in range(ll):
-						idx = kmeans_bags[count + j]
-						self._histogram[i][idx] += 1
-					count += ll
-
-			if self.verbose:
-				print("Vocabulary Histogram Generated")
-				print("Normalize...")
-
-			# Scale features
-			self._histogram = self._scale.fit_transform(self._histogram)
-
-			if self.verbose:
-				print("Histogram shape", self._histogram.shape)
-				print("Trainning...")
+		print("Trainning...")
 
 		# Train classifier
 		self.estimator.fit(self._histogram, self._labels)
@@ -187,6 +132,66 @@ class BOVW:
 		if self.verbose:
 			print(self.estimator)
 			print("Trainning done!")
+
+	def build_features(self, images_dict, n_images):
+		features = []
+		encoded = 0
+		# Thực hiện encode label
+		for label, images in images_dict.items():
+			self._labels_dict[str(encoded)] = label
+
+			if self.verbose:
+				print("Computing features for", label)
+
+			for image in images:
+				self._labels = np.append(self._labels, encoded)
+				kp, des = self.__extract_features(image)  # Lấy features
+				features.append(des)
+
+			encoded += 1
+
+		# Sắp xếp lại các features
+		features_v = self.__formart_features(features)
+
+		if self.verbose:
+			print("Clustering...")
+
+		# Phân cụm các features => tương dương với giảm chiều
+		if self.mini_batches:
+			k = 20
+			each = int(features_v.shape[0] / k) + 10
+			print("Data per fold", each)
+			start = 0
+			for i in range(k):
+				self._kmeans.partial_fit(features_v[start:start + each])
+				start += each
+			if start < each:
+				print("Clustering error!")
+				return
+			kmeans_bags = self._kmeans.predict(features_v)
+		else:
+			kmeans_bags = self._kmeans.fit_predict(features_v)
+
+		# Với mỗi ảnh, xem xem 1 ảnh với mỗi bags có bao nhiêu features thuộc vào
+		self._histogram = np.array([np.zeros(self.n_bags) for i in range(n_images)])
+		count = 0
+		for i in range(n_images):
+			if features[i] is not None:
+				ll = len(features[i])
+				for j in range(ll):
+					idx = kmeans_bags[count + j]
+					self._histogram[i][idx] += 1
+				count += ll
+
+		if self.verbose:
+			print("Vocabulary Histogram Generated")
+			print("Normalize...")
+
+		# Scale features
+		self._histogram = self._scale.fit_transform(self._histogram)
+
+		if self.verbose:
+			print("Histogram shape", self._histogram.shape)
 
 	def predict_one(self, image):
 		"""Predict a single image"""
@@ -209,6 +214,22 @@ class BOVW:
 			name = self._labels_dict[str(int(predict))]
 
 		return name, predict
+
+	def cross_validation(self, paths):
+		if self.verbose:
+			print("Fetch train images....")
+
+		images_dict, n_images = self.__get_files(paths, False)
+
+		self.build_features(images_dict, n_images)
+
+		print("Cross Validation...")
+
+		scores = cross_val_score(self.estimator, self._histogram, self._labels, cv=5)
+
+		print("Accuracy: %0.2f (+/- %0.2f)" % (scores.mean(), scores.std() * 2))
+
+		return scores
 
 	def score(self, test_path):
 		y_true, y_pred, acc = self.__accuracy(test_path)
@@ -302,7 +323,7 @@ class BOVW:
 		if self.verbose:
 			print("Fetch test images...")
 
-		images_dict, n_images = self.__get_files(test_path, False)
+		images_dict, n_images = self.__get_files([test_path], False)
 
 		y_true, y_pred = [], []
 		for label, images in images_dict.items():
@@ -379,8 +400,8 @@ class BOVW:
 		kp = self.xfeat.detect(image_temp, None)
 		return self.xfeat.compute(image, kp)
 
-	def __get_files(self, path, is_balance=None):
-		"""Get images dictionary from path
+	def __get_files(self, paths, is_balance=None):
+		"""Get images dictionary from many paths
 			Keys is label
 			Values is list of images
 		"""
@@ -389,26 +410,28 @@ class BOVW:
 
 		images = {}
 		n_sample, count = 0, 0
-		for each in glob(path + "*"):
-			# Extract lable from path
-			label = each.replace("\\", "/").split("/")[-1]
-			if self.verbose:
-				print("Reading image from", label)
+		for path in paths:
+			for each in glob(path + "*"):
+				# Extract lable from path
+				label = each.replace("\\", "/").split("/")[-1]
+				if self.verbose:
+					print("Reading image from", label)
 
-			images[label] = []
-			images_list = glob(path + label + "/*")
-			k = len(images_list)
-			if n_sample == 0:
-				n_sample = k
-			if n_sample > k:
-				n_sample = int(np.ceil((n_sample + k) / self.resample_factor))
-			for image in images_list:
-				img = cv2.imread(image)
-				images[label].append(img)
-				count += 1
+				if label not in images.keys():
+					images[label] = []
+				images_list = glob(path + label + "/*.png")
+				k = len(images_list)
+				if n_sample == 0:
+					n_sample = k
+				if n_sample > k:
+					n_sample = int(np.ceil((n_sample + k) / self.resample_factor))
+				for image in images_list:
+					img = cv2.imread(image)
+					images[label].append(img)
+					count += 1
 
-			# Shuffle
-			images[label] = sklearn.utils.shuffle(images[label], random_state=self.random_state)
+				# Shuffle
+				images[label] = sklearn.utils.shuffle(images[label], random_state=self.random_state)
 
 		if is_balance:
 			import random as rand
